@@ -6,23 +6,20 @@ library(reshape2)
 library(broom)
 library(caret)
 library(readr)
-library(ISOweek)
 library(lubridate)
-library(corrplot)
 library(ggthemes)
+library(formattable)
+
 
 #************************************************************************************
 #*                    CROWN ROT PREDICTION FOR ORGANIC BANANAS
 #************************************************************************************
-
+getwd()
+setwd("C:/Users/hwwaal/projects/edx_project")
 #READING QUALITY AND SHIPMENT DATA 
 data <- read.csv("data.txt")
-head(data)
+
 #data legend:
-# line  : shipping line carrying the consignment
-# dd    : date of discharge in port of destination
-# port  : port of destination in ISO code
-# vessel: ship name carrying  the consignment
 # ca    : dummy variable indicating if consignment is carried under controlled atmosphere
 # pd    : pack date (a few days before date of departure of vessel)
 # days  : the transit time, the time between pack date and date of discharge
@@ -32,11 +29,9 @@ head(data)
 # C     : the summed and weighted crown rot percentage (CR + 2 * CRC)
 
 
-data <- data %>% mutate(line = as.factor(line), dd = as.Date(dd), port = as.factor(port),
-         vessel = as.factor(vessel), ca = as.factor(ca), pd = as.Date(pd)) 
+data <- data %>% select(-X) %>% mutate(dd = as.Date(dd), ca = as.factor(ca), pd = as.Date(pd)) 
 #in the above, we make factors and create the dependent variable C, which is composed of 
 #the incidence of light crown rot CR and heavy crown rot CRC. Heavy is penalised by a factor of 2.
-write.csv(data, "data.txt")
 
 # explore the crown rot incidence per pack date
 data %>% ggplot(aes(pd, C*100, col=ca)) +
@@ -78,11 +73,7 @@ names(weather) <- vars # attach understandable variable names to the columns
 # select the variables to be used and mutate some new variables
 
 W_PE <- weather %>% select(date, temp) %>%
-  mutate(wk = strftime(date, format = "%V"), 
-                       wk_yr =strftime(date, format = "%V-%Y"),
-                       week = ISOweek(date),
-                       week_date = as.Date(cut(as.Date(date), "week")),
-                       date = as.Date(date))
+  mutate(date = as.Date(date))
 
 # create a function for calculation of a temperature sum over a specified time span
 # define the time span for the accumulated degree days
@@ -118,7 +109,25 @@ summ_add_PE %>%
         axis.text.x = element_text(angle=0, hjust=1)) 
 
 
-# overlay add, cumulative rainfall and crown rot
+
+# join the quality data to the weather data to have a list of qulaity data with ADDs for every shipment.
+data_PE <- data %>% left_join(summ_add_PE, by = c('pd' = 'date')) 
+
+#************************************************************************************
+#                             EXPLORATORY DATA ANLYSIS
+#*********************************************************************************
+
+#make a plot of average CR incidence per despatch month
+data %>% mutate(week = strftime(dd, format = "%V"), month = strftime(dd, format = "%m")) %>% 
+  ggplot(aes(month, C*100, col = ca)) +
+  geom_boxplot() +
+    scale_x_discrete(name = "month") +
+    scale_y_continuous(name = "crown rot per month average %") +
+    theme(axis.title.y = element_text(color = "grey"),
+          axis.title.y.right = element_text(color = "blue")) +
+    theme_few()
+
+# make an overlay plot of ADD  and crown rot
 ggplot() + 
   geom_line(data=summ_add_PE, aes(x=date, y=add), color='blue') + 
   geom_point(data=data, aes(x=pd, y=C*2000), color='purple', alpha = 0.5)+
@@ -127,15 +136,136 @@ ggplot() +
                      sec.axis = sec_axis(~./100, name = "crown rot", 
                                          labels = function(b) { paste0(round(b, 0), "%")})) +  
   theme(axis.title.y = element_text(color = "grey"),
-    axis.title.y.right = element_text(color = "blue")) +
+        axis.title.y.right = element_text(color = "blue")) +
   theme_few()
 
-#**********
-#**********
-#**********
+#make a heatmap of crown rot versus transit time (days) and ADD 
+#define bins
+lbl_days <- c("11-20", "21-30", "31-40", "41-50", "51-60", "61-70")
 
-# join the crown rot data on the weather data to prepare for a linear regression
-data_PE <- d4 %>% left_join(d3, by = c('pd' = 'date')) %>% filter(pd > "2015-01-01") %>% ungroup()
+lbl_add <- c("401-500", "501-600", "601-700", "701-800", "801-900",
+             "901-1000", "1001-1100","1101-1200")
+
+#compute averages per bin
+data_hm_PE <- data_PE %>% mutate(day_bins = cut(days, breaks = seq(10, 70, 10), include.lowest = FALSE, label = lbl_days), 
+         add_bins = cut(add, breaks = seq(400,1200, 100), include.lowest = FALSE, label = lbl_add)) %>%
+  group_by(day_bins, add_bins, ca) %>%
+  summarize(CR_avg = mean(C), n = n())
+
+#make geom_tile plot
+p2 <- data_hm_PE %>%
+  ggplot(aes(x = day_bins, y = add_bins)) +
+  geom_tile(aes(fill = CR_avg*100)) + 
+  scale_fill_gradient2(low = "white", high = "blue", 
+                       midpoint = 1, 
+                       breaks = seq(0, 20, 5), 
+                       limits = c(0, 20)) +
+  labs(title="crownrot versus ADD and transit time",
+       x ="transit time (days)", y = "temperature sum (degree.days)", 
+       subtitle = "figures indicate number of shipments") +
+  labs(fill = "Avg crown rot %") +
+  geom_text(aes(label = n), size = 2) +
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=0, hjust=1)) + 
+  facet_grid(. ~ ca)
+p2 + theme(plot.subtitle=element_text(size=8, hjust=0, face="italic", color="black"))
+
+
+#explore correlation between variables
+
+#make a correlation matrix
+source("corstars.R") #this retrieves the function created by 
+data_PE %>% select(C, add, grow_temp, days, ca) %>%
+  drop_na() %>% corstars(.) 
+
+#******************************************************************************
+#*                  PREDICTING CROWN ROT WITH VARIOUS ML ALGORITHMS
+#******************************************************************************
+
+
+
+
+#Create a categorical variable for CR risk"(low/medium/high:
+summary(data_PE$C)
+
+data_ML <- data_PE %>% select(ca, days, C, add, pd) %>% 
+  mutate(C_risk = cut(C, breaks = c(0,0.01,0.05,1), 
+                      include.lowest = TRUE,
+                      labels = c("low", "medium", "high")),
+         ca = as.factor(ca)) %>%
+  select(-C)
+
+
+#make a descriptive statistics table
+library(skimr)
+skimmed <- skim(data_ML)
+skimmed
+
+#check for near-zero-variance predictors because dataset is unbalanced
+
+nzv <- nearZeroVar(data_ML, saveMetrics= TRUE)
+formattable(nzv)
+
+
+#splitting the data in a train and a test set and a hold-out set for validation
+validation <- data_ML %>% filter(pd >= "2021-01-01")
+traintest <- data_ML %>% filter(pd < "2021-01-01") %>% drop_na()
+
+#create a data partition
+set.seed(3456)
+trainIndex <- createDataPartition(traintest$C_risk, p = .5, 
+                                  list = FALSE, 
+                                  times = 1)
+
+train <- traintest[trainIndex,]
+test <- traintest[-trainIndex,]
+
+# try a boosted tree model
+fitControl <- trainControl(## 10-fold CV
+  method = "repeatedcv",
+  number = 10,
+  ## repeated ten times
+  repeats = 10)
+
+
+set.seed(825)
+gbmFit1 <- train(C_risk ~ ., data = train, 
+                 method = "gbm",
+                 preProcess = c("center", "scale"),
+                 trControl = fitControl,
+                 verbose = FALSE)
+gbmFit1
+
+y_hat <- predict(gbmFit1, newdata = test)
+confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
+
+
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                        n.trees = (1:30)*50, 
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+gbmFit1 <- train(C_risk ~ ., data = train, 
+                 method = "gbm",
+                 preProcess = c("center", "scale"),
+                 tuneGrid = gbmGrid,
+                 verbose = FALSE)
+gbmFit2
+
+# try a k-nearest neighbour model
+knnFit1 <- train(C_risk ~ ., data = train, 
+                 method = "knn",
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10,
+                 trControl = trainControl(method = "cv"))
+
+
+
+
+
+
+#data preprocessing (centering and scaling)
+preProcess(data_ML, method=c('center','scale'))
+
 
 # do a normal linear regression
 library(broom)
