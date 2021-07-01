@@ -244,12 +244,28 @@ gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
                         n.trees = (1:30)*50, 
                         shrinkage = 0.1,
                         n.minobsinnode = 20)
-gbmFit1 <- train(C_risk ~ ., data = train, 
+gbmFit2 <- train(C_risk ~ ., data = train, 
                  method = "gbm",
                  preProcess = c("center", "scale"),
                  tuneGrid = gbmGrid,
                  verbose = FALSE)
 gbmFit2
+y_hat <- predict(gbmFit2, newdata = test)
+confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
+
+
+
+## now using ROSE to create a more balanced dataset
+library(ROSE)
+
+genData_2 = SMOTE(train[,-4],train[,4],K=3)
+table(newData$Species)
+
+###################################
+####################################
+##################################
+
+
 
 # try a k-nearest neighbour model
 knnFit1 <- train(C_risk ~ ., data = train, 
@@ -258,8 +274,8 @@ knnFit1 <- train(C_risk ~ ., data = train,
                  tuneLength = 10,
                  trControl = trainControl(method = "cv"))
 
-
-
+y_hat <- predict(knnFit1, newdata = test)
+confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
 
 
 
