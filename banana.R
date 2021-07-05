@@ -12,6 +12,12 @@ library(formattable)
 library(nnet)
 
 
+list.of.packages <- c("readxl", "tidyverse", "curl", "httr", "reshape2", "broom", "caret", "lubridate", 
+                      "ggthemes", "formattable", "nnet", "knn", "rpart", "skimr", "rpart.plot", "UBL", "glmnet", 
+                      "rf", "rda", "treebag", "svm")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
 #************************************************************************************
 #*                    CROWN ROT PREDICTION FOR ORGANIC BANANAS
 #************************************************************************************
