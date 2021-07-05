@@ -9,6 +9,7 @@ library(readr)
 library(lubridate)
 library(ggthemes)
 library(formattable)
+library(nnet)
 
 
 #************************************************************************************
@@ -22,10 +23,10 @@ data <- read.csv("data.txt")
 #data legend:
 # ca    : dummy variable indicating if consignment is carried under controlled atmosphere
 # pd    : pack date (a few days before date of departure of vessel)
+# dd    : discharge data (date of opening the container in Europe)
 # days  : the transit time, the time between pack date and date of discharge
 # CR    : the percentage of crown rot (mild)
 # CRC   : the percentage of crown rot (heavy)
-# bio   : dummy variable indicating the consignment is organic
 # C     : the summed and weighted crown rot percentage (CR + 2 * CRC)
 
 
@@ -41,7 +42,6 @@ data %>% ggplot(aes(pd, C*100, col=ca)) +
   theme(text = element_text(size=8),
         axis.text.x = element_text(angle=0, hjust=1)) +
   theme_few()
-
 
 #READ WEATHER DATA FROM WEATHER STATION CLOSE TO PRODUCTION LOCATION.
 
@@ -95,7 +95,7 @@ summ_PE %>% filter(date > "2016-01-01") %>%
   theme_few()
 
 #formula to calculate the cumulative sums based on span and cut-off of 13.5°C
-summ_add_PE <- summ_PE %>% filter(date >=  (as.Date("2016-01-01")-span*7)) %>% 
+summ_add_PE <- summ_PE %>% filter(date >=  (as.Date("2015-01-01")-span*7)) %>% 
   mutate(grow_temp = (mean_temp - 13.5), cdd = cumsum(grow_temp)) %>% #the grow temperature is the temperature above 13.5°C under which temperature bananas do not grow but die
   mutate(add = cdd - lag(cdd, span*7)) %>% # the accumulated degree.days or temperature sum is calculated for every day from the cumulative grow_temp
   na.exclude() #exclude rows with NaN
@@ -110,7 +110,7 @@ summ_add_PE %>%
 
 
 
-# join the quality data to the weather data to have a list of qulaity data with ADDs for every shipment.
+# join the quality data to the weather data to have a list of quality data with ADDs for every shipment.
 data_PE <- data %>% left_join(summ_add_PE, by = c('pd' = 'date')) 
 
 #************************************************************************************
@@ -118,7 +118,7 @@ data_PE <- data %>% left_join(summ_add_PE, by = c('pd' = 'date'))
 #*********************************************************************************
 
 #make a plot of average CR incidence per despatch month
-data %>% mutate(week = strftime(dd, format = "%V"), month = strftime(dd, format = "%m")) %>% 
+data %>% mutate(week = strftime(pd, format = "%V"), month = strftime(pd, format = "%m")) %>% 
   ggplot(aes(month, C*100, col = ca)) +
   geom_boxplot() +
     scale_x_discrete(name = "month") +
@@ -130,7 +130,7 @@ data %>% mutate(week = strftime(dd, format = "%V"), month = strftime(dd, format 
 # make an overlay plot of ADD  and crown rot
 ggplot() + 
   geom_line(data=summ_add_PE, aes(x=date, y=add), color='blue') + 
-  geom_point(data=data, aes(x=pd, y=C*2000), color='purple', alpha = 0.5)+
+  geom_point(data=data_PE, aes(x=pd, y=C*2000), color='purple', alpha = 0.5)+
   scale_x_date(name = "date", labels = date) +
   scale_y_continuous(name = "temperature sum °C.day", 
                      sec.axis = sec_axis(~./100, name = "crown rot", 
@@ -147,10 +147,13 @@ lbl_add <- c("401-500", "501-600", "601-700", "701-800", "801-900",
              "901-1000", "1001-1100","1101-1200")
 
 #compute averages per bin
-data_hm_PE <- data_PE %>% mutate(day_bins = cut(days, breaks = seq(10, 70, 10), include.lowest = FALSE, label = lbl_days), 
-         add_bins = cut(add, breaks = seq(400,1200, 100), include.lowest = FALSE, label = lbl_add)) %>%
+data_hm_PE <- data_PE %>% drop_na(add) %>% mutate(day_bins = cut(days, breaks = seq(10, 70, 10), 
+                        include.lowest = FALSE, label = lbl_days), 
+         add_bins = cut(add, breaks = seq(400,1200, 100), 
+                        include.lowest = FALSE, label = lbl_add)) %>%
+  select(day_bins, add_bins, C, days, ca) %>%
   group_by(day_bins, add_bins, ca) %>%
-  summarize(CR_avg = mean(C), n = n())
+  dplyr::summarize(CR_avg = mean(C), n = n(), ca=ca)
 
 #make geom_tile plot
 p2 <- data_hm_PE %>%
@@ -160,7 +163,7 @@ p2 <- data_hm_PE %>%
                        midpoint = 1, 
                        breaks = seq(0, 20, 5), 
                        limits = c(0, 20)) +
-  labs(title="crownrot versus ADD and transit time",
+  labs(title="crown rot versus ADD and transit time",
        x ="transit time (days)", y = "temperature sum (degree.days)", 
        subtitle = "figures indicate number of shipments") +
   labs(fill = "Avg crown rot %") +
@@ -175,31 +178,38 @@ p2 + theme(plot.subtitle=element_text(size=8, hjust=0, face="italic", color="bla
 
 #make a correlation matrix
 source("corstars.R") #this retrieves the function created by 
-data_PE %>% select(C, add, grow_temp, days, ca) %>%
+data_PE %>% select(C, add, days, ca) %>% mutate(ca = as.numeric(ca)) %>%
+cor(., method = "kendall", use = "complete.obs")
+
+data_PE %>% select(C, add, days, ca) %>% mutate(CA = as.numeric(ca)) %>% select(-ca) %>%
   drop_na() %>% corstars(.) 
+
+
 
 #******************************************************************************
 #*                  PREDICTING CROWN ROT WITH VARIOUS ML ALGORITHMS
 #******************************************************************************
 
 
+data_PE %>% filter(C<0.2) %>% ggplot(aes(C)) +
+  geom_histogram(binwidth  = 0.01 )
 
 
 #Create a categorical variable for CR risk"(low/medium/high:
-summary(data_PE$C)
-
 data_ML <- data_PE %>% select(ca, days, C, add, pd) %>% 
-  mutate(C_risk = cut(C, breaks = c(0,0.01,0.05,1), 
+  mutate(C_risk = cut(C, breaks = c(0,0.007, 0.075, 1), 
                       include.lowest = TRUE,
-                      labels = c("low", "medium", "high")),
+                      labels = c("low", "medium",  "high")),
          ca = as.factor(ca)) %>%
   select(-C)
 
 
-#make a descriptive statistics table
+#make a descriptive statistics table to inspect the data
 library(skimr)
 skimmed <- skim(data_ML)
 skimmed
+
+
 
 #check for near-zero-variance predictors because dataset is unbalanced
 
@@ -207,12 +217,16 @@ nzv <- nearZeroVar(data_ML, saveMetrics= TRUE)
 formattable(nzv)
 
 
+#************************************************************************************
+#* make train and test data sets
+#* ********************************************************************************
+
 #splitting the data in a train and a test set and a hold-out set for validation
-validation <- data_ML %>% filter(pd >= "2021-01-01")
-traintest <- data_ML %>% filter(pd < "2021-01-01") %>% drop_na()
+validation <- data_ML %>% filter(pd >= "2021-01-01") %>% select(-pd) %>% mutate(ca = as.integer(ca))
+traintest <- data_ML %>% filter(pd < "2021-01-01") %>% drop_na() %>% select(-pd) %>% mutate(ca = as.integer(ca))
 
 #create a data partition
-set.seed(3456)
+set.seed(1, sample.kind = "Rounding")
 trainIndex <- createDataPartition(traintest$C_risk, p = .5, 
                                   list = FALSE, 
                                   times = 1)
@@ -220,380 +234,241 @@ trainIndex <- createDataPartition(traintest$C_risk, p = .5,
 train <- traintest[trainIndex,]
 test <- traintest[-trainIndex,]
 
-# try a boosted tree model
-fitControl <- trainControl(## 10-fold CV
-  method = "repeatedcv",
-  number = 10,
-  ## repeated ten times
-  repeats = 10)
+# train a decision tree for test
+library(rpart)
+set.seed(2, sample.kind = "Rounding")
+model1 <- train(C_risk ~ ., data = train, 
+                method = "rpart",
+                preProcess = c("center", "scale"),
+                tuneLength = 10,
+                trControl = trainControl(method = "cv"))
 
-
-set.seed(825)
-gbmFit1 <- train(C_risk ~ ., data = train, 
-                 method = "gbm",
-                 preProcess = c("center", "scale"),
-                 trControl = fitControl,
-                 verbose = FALSE)
-gbmFit1
-
-y_hat <- predict(gbmFit1, newdata = test)
+y_hat <- predict(model1, newdata = test)
 confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
 
 
-gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
-                        n.trees = (1:30)*50, 
-                        shrinkage = 0.1,
-                        n.minobsinnode = 20)
-gbmFit2 <- train(C_risk ~ ., data = train, 
-                 method = "gbm",
+#visualize the decision tree
+library(rpart.plot)
+set.seed(3, sample.kind = "Rounding")
+model.rpart1 <- rpart(C_risk ~ ., data = train, method = "class", control = rpart.control(cp = 0.01))
+rpart.plot(model.rpart1)
+
+# train a simple k-nearest neighbour model 
+set.seed(1, sample.kind = "Rounding")
+model_knn1 <- train(C_risk ~ ., data = train, 
+                   method = "knn",
+                   preProcess = c("center", "scale"),
+                   tuneLength = 10,
+                   trControl = trainControl(method = "cv"))
+
+y_hat_knn1 <- predict(model_knn1, newdata = test)
+cfm_r <- confusionMatrix(y_hat_knn1, test$C_risk, dnn = c("Prediction", "Reference"))
+cfm_r
+
+# creating a synthetic balanced data set using synthetic sampling (SMOTE)
+
+library(UBL)
+train.smote <- SmoteClassif(C_risk ~ ., train, list("low"=0.5, "medium" = 2, "high"=7), k = 5, repl = FALSE,
+             dist = "Euclidean")
+
+#the table show the dataset is now balanced over the classes (using under and oversampling)
+table(train.smote$C_risk)
+skim(train.smote)
+
+
+# test the smoted dataset on the decision tree:
+model_rpart <- train(C_risk ~ ., data = train.smote, 
+                method = "rpart",
+                preProcess = c("center", "scale"),
+                tuneLength = 10,
+                trControl = trainControl(method = "cv"))
+
+y_hat_rpart <- predict(model_rpart, newdata = test)
+cfm_rpart <- confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
+
+#we can again visualize the decision tree
+library(rpart.plot)
+#we can use priors of the distribution to improve the model and define minimum splits to reduce detail
+model.rpart2 <- rpart(C_risk ~ ., data = train.smote, method = "class", parms = list(split = "ca"),
+                      control = rpart.control(minsplit = 50))
+rpart.plot(model.rpart2)
+
+
+# train a  k-nearest neighbour model on smote dataset
+set.seed(2, sample.kind = "Rounding")
+
+model_knn <- train(C_risk ~ ., data = train.smote, 
+                method = "knn",
+                preProcess = c("center", "scale"),
+                tuneLength = 10,
+                trControl = trainControl(method = "cv"),
+                tuneGrid = expand.grid(k = c(2, 5, 11)))
+model_knn
+y_hat_knn <- predict(model_knn, newdata = test)
+cfm_knn <- confusionMatrix(y_hat_knn, test$C_risk, dnn = c("Prediction", "Reference"))
+
+# train a multinomial generalized linear model/neural network
+set.seed(1, sample.kind = "Rounding")
+library(glmnet)
+myControl <- trainControl(
+  method = "cv", number = 10,
+  classProbs = TRUE # Super important!
+)
+
+myGrid <- expand.grid(
+  alpha = 0:1,
+  lambda = seq(0.0001, 1, length = 20)
+)
+# Fit a model
+set.seed(33)
+model_glmnet <- train(C_risk ~ ., data = train.smote,  
+                method = "glmnet", 
+                tuneGrid = myGrid,
+                trControl = myControl)
+
+#Check the model
+model_glmnet
+y_hat_glmnet <- predict(model_glmnet, newdata = test)
+cfm_glmnet <- confusionMatrix(y_hat_glmnet, test$C_risk, dnn = c("Prediction", "Reference"))
+
+# train a support vector machine linear model
+
+model_svm <- train(C_risk ~ ., data = train.smote, 
+                method = "svmLinear",
+                tuneGrid = expand.grid(C = seq(0, 2, length = 20)),
+                preProcess = c("center", "scale"),
+                trControl = trainControl(method = "cv"))
+
+y_hat_svm <- predict(model_svm, newdata = test)
+cfm_svm <- confusionMatrix(y_hat_svm, test$C_risk, dnn = c("Prediction", "Reference"))
+
+# train a  neural network
+set.seed(2, sample.kind = "Rounding")
+model_nnet <- train(C_risk ~ ., data = train.smote, 
+                method = "nnet",
+                preProcess = c("center", "scale"),
+                trControl = trainControl(method = "cv"))
+model_nnet
+y_hat_nnet <- predict(model_nnet, newdata = test)
+cfm_nnet <- confusionMatrix(y_hat_nnet, test$C_risk, dnn = c("Prediction", "Reference"))
+
+# train a  treebag
+set.seed(2, sample.kind = "Rounding")
+model_treebag <- train(C_risk ~ ., data = train.smote, 
+                 method = "treebag",
                  preProcess = c("center", "scale"),
-                 tuneGrid = gbmGrid,
-                 verbose = FALSE)
-gbmFit2
-y_hat <- predict(gbmFit2, newdata = test)
-confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
-
-
-
-## now using ROSE to create a more balanced dataset
-library(ROSE)
-
-genData_2 = SMOTE(train[,-4],train[,4],K=3)
-table(newData$Species)
-
-###################################
-####################################
-##################################
-
-
-
-# try a k-nearest neighbour model
-knnFit1 <- train(C_risk ~ ., data = train, 
-                 method = "knn",
-                 preProcess = c("center", "scale"),
-                 tuneLength = 10,
                  trControl = trainControl(method = "cv"))
+model_treebag
+y_hat_treebag <- predict(model_treebag, newdata = test)
+cfm_treebag <- confusionMatrix(y_hat_treebag, test$C_risk, dnn = c("Prediction", "Reference"))
 
-y_hat <- predict(knnFit1, newdata = test)
-confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
+# train a random forest model
+#10 folds repeat 10 times
+control <- trainControl(method='repeatedcv', 
+                        number=10, 
+                        repeats=10)
+#Metric compare model is Accuracy
+metric <- "Accuracy"
+set.seed(123)
 
+#Number random variable selected is mtry
+mtry <- 2
+tunegrid <- expand.grid(.mtry=mtry)
+model_rf <- train(C_risk ~., 
+                data=train.smote, 
+                preProcess = c("center", "scale"),
+                method='rf', 
+                metric='Accuracy', 
+                tuneLength  = 4, 
+                trControl=control)
+print(model_rf)
 
-
-#data preprocessing (centering and scaling)
-preProcess(data_ML, method=c('center','scale'))
-
-
-# do a normal linear regression
-library(broom)
-model3 <- lm(C ~ add + rfs + days + ca, data = data_PE)
-tidy(model3)
-
-
-
-
-summary(data$C)
-#do a fractional response regression
-model4 <- glm(C ~ add + rfs + days + ca, 
-              family = quasipoisson(link = "log"),
-              data = data_PE)
-summary(model4)
-library(lmtest)
-library(sandwich)
-
-se_glm_robust = coeftest(model4, vcov = vcovHC(model4, type="HC"))
-se_glm_robust
-
-# make a plot of average weekly temperature since start of measurements
-tw <- summ_PE %>% mutate(wk = week(date)) %>% group_by(wk) %>%
-  summarize(temp_wk = mean(mean_temp, na.rm=TRUE))
-plot(tw$wk, tw$temp_wk)
+y_hat_rf <- predict(model_rf, newdata = test)
+cfm_rf <- confusionMatrix(y_hat_rf, test$C_risk, dnn = c("Prediction", "Reference"))
 
 
-#make a plot of crown rot versus ADD by CA
-data_PE %>% filter(C > 0.01) %>% ggplot(aes(add, C, col=ca)) + geom_point()
+# train an rda
+set.seed(2, sample.kind = "Rounding")
+model_rda <- train(C_risk ~ ., data = train.smote, 
+                       method = "rda",
+                       preProcess = c("center", "scale"),
+                       trControl = trainControl(method = "cv"))
+model_rda
+y_hat_rda <- predict(model_rda, newdata = test)
+cfm_rda <- confusionMatrix(y_hat_rda, test$C_risk, dnn = c("Prediction", "Reference"))
 
-#make a plot of crown rot versus RFS by CA
-data_PE %>% filter(C > 0.01) %>% ggplot(aes(rfs, C, col=ca)) + geom_point()
+# train a multilayer perceptron
+set.seed(2, sample.kind = "Rounding")
+model_mlp <- train(C_risk ~ ., data = train.smote, 
+                      method = "mlp",
+                      preProcess = c("center", "scale"),
+                      trControl = trainControl(method = "cv"))
+model_mlp
+y_hat_mlp <- predict(model_mlp, newdata = test)
+cfm_mlp <- confusionMatrix(y_hat_mlp, test$C_risk, dnn = c("Prediction", "Reference"))
 
-#make a boxplot of crown rot by CA when add >1000 (below not much difference)
-data_PE %>% filter(add > 1000) %>% ggplot(aes(C, col=ca)) + geom_boxplot()
+# make a table of the results of the models
 
-#make a heatmap of add, days and C
-#first create bins
+results_models <- data.frame(cfm_knn$overall, cfm_mlp$overall, cfm_nnet$overall, 
+                             cfm_rda$overall, cfm_rf$overall, cfm_rpart$overall,
+                             cfm_svm$overall, cfm_treebag$overall, cfm_glmnet$overall)
+names <- c("k-nearest neighbors", "multilayer perceptron", "neural network", "regularized discriminant analysis", "random forest",
+           "recursive partitioning & regression trees", "support vector machine", "bootstrap aggregated tree", "generalized linerar model")
+results_models<- results_models[1:2,]
+colnames(results_models) <- names
 
-data_PE$days <- as.integer(data$days)
-data_PE$add <- as.integer(data$add)
-
-lbl_days <- c("11-15", "16-20", "21-25", "26-30", "31-35", "36-40", "41-45", "46-50", "51-55", "56-60", "61-65", "66-70")
-
-lbl_add <- c("401-450", "451-500", "501-550", "551-600", "601-650",
-             "651-700", "701-750","751-800", "801-850", "851-900","901-950",
-             "951-1000", "1001-1050", "1051-1100", "1101-1150", "1151-1200")
-
-lbl_days <- c("11-20", "21-30", "31-40", "41-50", "51-60", "61-70")
-
-lbl_add <- c("401-500", "501-600", "601-700", "701-800", "801-900",
-             "901-1000", "1001-1100","1101-1200")
-
-
-data_hm_PE <- data %>% select(add, days, C, ca, lot) %>%
-  mutate(day_bins = cut(days, breaks = seq(10, 70, 10), include.lowest = FALSE, label = lbl_days), 
-                add_bins = cut(add, breaks = seq(400,1200, 100), include.lowest = FALSE, label = lbl_add)) %>%
-  group_by(day_bins, add_bins, ca) %>%
-  summarize(CR_avg = mean(C), n = n())
-
-summary(data_hm_PE$CR_avg)
-
-p2 <- data_hm_PE %>%
-  ggplot(aes(x = day_bins, y = add_bins)) +
-  geom_tile(aes(fill = CR_avg)) + 
-  scale_fill_gradient2(low = "white", high = "blue", 
-                       midpoint = 0.1, 
-                       breaks = seq(0, 0.2, 0.05), 
-                       limits = c(0, 0.2)) +
-  labs(title="crownrot Peru by temperature sum and transit ~ CA",
-       x ="transit time (days)", y = "temperature sum (degree.days)") +
-  labs(fill = "Avg crown rot ratio") +
-  geom_text(aes(label = n), size = 2) +
-  theme(text = element_text(size=10),
-        axis.text.x = element_text(angle=0, hjust=1)) + 
-  facet_grid(. ~ ca)
-p2
- 
-#Kruskall Wallis test for difference of the means
-data_PE %>% filter(add > 1000) %>%
-group_by(ca) %>%
-  summarise(
-    count = n(),
-    mean = mean(C, na.rm = TRUE),
-    sd = sd(C, na.rm = TRUE),
-    median = median(C, na.rm = TRUE),
-    IQR = IQR(C, na.rm = TRUE)) 
-
-data_PE %>% filter(add > 1000) %>% kruskal.test(C ~ ca, data = .)
-            
-model <- lm(C ~ add + rfs + days + ca + supplier, data = data_PE)
-summary(model)
-
-plot(data_PE$pd, data_PE$rfs)
-res <- data_PE %>% mutate(ca = as.numeric(ca)) %>% 
-  select(-pd, -supplier, -cdd, -CR, -CRC, -lot, -med_temp, -mean_temp, 
-         -grow_temp, -crf, -mean_rainfall, -mean_humidity) %>% 
-  cor(., use = "complete.obs")
-res
-
-corrplot(res, type = "upper", order = "hclust", 
-         tl.col = "black", tl.srt = 45)
-library("PerformanceAnalytics")
-data_PE %>% mutate(ca = as.numeric(ca)) %>% 
-  select(-pd, -supplier, -cdd, -CR, -CRC, -lot, -med_temp, -mean_temp, 
-         -grow_temp, -crf, -mean_rainfall, -mean_humidity) %>% 
-  chart.Correlation(., histogram=TRUE, pch=19)
+df <- cbind(parameter = rownames(results_models), as_tibble(results_models)) %>% 
+  pivot_longer(cols = -"parameter", names_to = c("algorithm"), values_to = "value")
 
 
-
-
-
-#************************************************************************************
-#*                                            ECUADOR
-#************************************************************************************
-write_excel_csv(W84370, "W84370.xls") #Tumbes, while Santa Rosa is not available. Rainfall
-# in Tumbes is lower (178 versus 418 mm annually).
-getwd()
-#*******************************************************************************
-#read the weather from meteostat:84370
-url <- "https://bulk.meteostat.net/hourly/84370.csv.gz"
-tempdir()
-tmp <- tempfile()
-curl_download(url, tmp)
-download.file(url, destfile = "84370")
-
-
-
-
-sapply(84370, read_weather)
-W84370 <- read.csv("W84370.wd")
-names(W84370) <- vars
-
-
-#* read the weather data of Tumbes from disk 
-
-W_EC <- W84370 %>% mutate(wk = strftime(date, format = "%V"), 
-                          wk_yr =strftime(date, format = "%V-%Y"),
-                          week = week(date),
-                          week_date = as.Date(cut(as.Date(date), "week")),
-                          date = as.Date(date))
-
-#create a function for calculation of temperature sum
-# define the time span for the accumulated degree days
-span <- 10 #weeks
-
-# make a dataframe with mean and median weather data per day
-summ_EC <- W_EC %>% 
-  group_by(date) %>%
-  summarise(med_temp = median(temp, na.rm = TRUE),
-            mean_temp = mean(temp, na.rm = TRUE), # you can also calc mean if you want
-            mean_humidity = mean(rhum, na.rm = TRUE),
-            sum_rainfall = sum(prcp, na.rm = TRUE))
-
-
-
-# graph of mean temperature against date
-summ_EC %>% filter(date > "2015-01-01") %>%
-  ggplot(aes(date, mean_temp)) +
-  geom_line()
-
-# graph of rainfall against date : only available after 01-01-2021
-summ_EC %>% filter(date > "2015-01-01") %>%
-  ggplot(aes(date, sum_rainfall)) +
-  geom_line()
-
-
-#formula to calculate the cumulative sums based on span and cut-off of 13.5
-summ_add_EC <- summ_EC %>% filter(date >=  (as.Date("2015-01-01")-span*7)) %>% 
-  mutate(grow_temp = (mean_temp - 13.5), cdd = cumsum(grow_temp)) %>%
-  mutate(add = cdd - lag(cdd, span*7)) %>%
-  mutate(crf = cumsum(sum_rainfall)) %>% #calculate cumulative rainfall
-  mutate(rfs = crf - lag(crf, span*7)) #calculate rainfallsum
-
-
-# taking out NAs from data
-d5 <- summ_add_EC %>% na.exclude() 
-
-#plot accumulated degree days against date
-d5 %>%
-  ggplot(aes(date, add)) +
-  geom_line() + 
-  ylab('Accumulated Degree-Days')+ xlab('date') +
-  theme(text = element_text(size=10),
-        axis.text.x = element_text(angle=0, hjust=1)) 
-
-# make a dataframe with summed crown rot incidence by pack date
-#d6 <- df_cl %>% filter(origin == 'Peru') %>%
-#  select(pd, CR, CRC, supplier, days, ca, lot) %>%
-#  mutate(supplier = as.factor(supplier), ca = as.factor(ca)) %>%
-#  group_by(pd) %>%
-#  summarize(C = sum(CR+CRC), supplier = supplier, days = days, ca = ca, lot=lot)
-
-d6 <- df_cl %>% filter(origin == 'Ecuador' & bio == 1) %>%
-  select(pd, CR, CRC, supplier, days, ca, bio, lot) %>%
-  mutate(supplier = as.factor(supplier), ca = as.factor(ca), C = CR+2*CRC) 
-
-
-# overlay add, cumulative rainfall and crown rot: rainfall makes no sense as data only from 01-01-2021
-ggplot() + 
-  geom_line(data=d5, aes(x=date, y=add), color='green') + 
-  geom_smooth(data=d6, aes(x=pd, y=C*1E4), color='red',  method = 'loess', span = 0.05)+
-  scale_x_date(name = "date", labels = date) +
-  scale_y_continuous(name = "temperature sum °C.d (13.5)", 
-                     sec.axis = sec_axis(~./1E3, name = "crown rot", 
-                                         labels = function(b) { paste0(round(b, 0), "%")})) +  
+p3 <- df %>% filter(parameter == "Accuracy") %>% 
+  ggplot(aes(reorder(algorithm, value), value)) +
+                geom_bar(stat = "identity") +
+    scale_x_discrete(name = "algorithm") +
+  scale_y_continuous(name = "value") +
   theme(axis.title.y = element_text(color = "grey"),
-        axis.title.y.right = element_text(color = "blue"))
+        axis.title.y.right = element_text(color = "blue")) +
+  theme_few() 
+p3 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
 
-# join the crown rot data on the weather data to prepare for a linear regression
-data_EC <- d6 %>% left_join(d5, by = c('pd' = 'date')) %>% filter(pd > "2015-01-01") %>% ungroup()
+p4 <- df %>% filter(parameter == "Kappa") %>%
+  ggplot(aes(reorder(algorithm, value), value)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "kappa") +
+  scale_y_continuous(name = "value") +
+  theme(axis.title.y = element_text(color = "grey"),
+        axis.title.y.right = element_text(color = "blue")) +
+  theme_few() 
+p4 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
 
-# do a normal linear regression
-library(broom)
-model5 <- data_EC %>% filter(rfs >= 0) %>% do(tidy(lm(C ~ add +  days + ca, data = .)))
-model5
-summary(model5)
-
-
-
-#do a fractional response regression
-model6 <- glm(C ~ add + rfs + days + ca, 
-              family = gaussian,
-              data = data_EC)
-summary(model6)
-library(lmtest)
-library(sandwich)
-
-se_glm_robust = coeftest(model6, vcov = vcovHC(model6, type="HC"))
-se_glm_robust
-
-# make a plot of average weekly temperature since start of measurements
-tw <- summ_EC %>% mutate(wk = week(date)) %>% group_by(wk) %>%
-  summarize(temp_wk = mean(mean_temp, na.rm=TRUE))
-plot(tw$wk, tw$temp_wk)
+# final hold out test on validation sample with neural network
+# 
+y_hat_nnet_v <- predict(model_nnet, newdata = validation)
+cfm_nnet_v <- confusionMatrix(y_hat_nnet_v, validation$C_risk, dnn = c("Prediction", "Reference"))
+cfm_nnet_v
+confusion_matrix <- as.data.frame(table(pred = y_hat_nnet_v, ref = validation$C_risk))
 
 
-#make a plot of crown rot versus ADD by CA
-data_EC %>% filter(C > 0.01) %>% ggplot(aes(add, C, col=ca)) + geom_point()
+p5 <- ggplot(data = confusion_matrix, 
+       mapping = aes(x = pred,
+                     y = ref)) +
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = sprintf("%1.0f", Freq)), vjust = 1) +
+  scale_fill_gradient(low = "light blue",
+                      high = "purple") +
+  scale_x_discrete(name = "Prediction") +
+  scale_y_discrete(name = "Reference") +
+  theme_few() 
+p5
 
-#make a plot of crown rot versus RFS by CA
-data_EC %>% filter(C > 0.01) %>% ggplot(aes(rfs, C, col=ca)) + geom_point()
+# train a neural network on the imbalanced set for comparison
+set.seed(2, sample.kind = "Rounding")
+model_nnet_t <- train(C_risk ~ ., data = train, 
+                     method = "nnet",
+                     preProcess = c("center", "scale"),
+                     trControl = trainControl(method = "cv"))
+model_nnet_t
+y_hat_nnet_t_v <- predict(model_nnet_t, newdata = validation)
+cfm_nnet_t <- confusionMatrix(y_hat_nnet_t_v, validation$C_risk, dnn = c("Prediction", "Reference"))
+cfm_nnet_t
 
-#make a boxplot of crown rot by CA when add >1000 (below not much difference)
-data_EC %>% filter(add > 1000) %>% ggplot(aes(C, col=ca)) + geom_boxplot()
-
-#make a heatmap of add, days and C
-#first create bins
-
-data$days <- as.integer(data_EC$days)
-data$add <- as.integer(data_EC$add)
-
-lbl_days <- c("11-15", "16-20", "21-25", "26-30", "31-35", "36-40", "41-45", "46-50", "51-55", "56-60", "61-65", "66-70")
-
-lbl_add <- c("401-450", "451-500", "501-550", "551-600", "601-650",
-             "651-700", "701-750","751-800", "801-850", "851-900","901-950",
-             "951-1000", "1001-1050", "1051-1100", "1101-1150", "1151-1200")
-
-lbl_days <- c("11-20", "21-30", "31-40", "41-50", "51-60", "61-70")
-
-lbl_add <- c("401-500", "501-600", "601-700", "701-800", "801-900",
-             "901-1000", "1001-1100","1101-1200")
-
-
-data_hm_EC <- data_EC %>% select(add, days, C, ca, lot) %>%
-  mutate(day_bins = cut(days, breaks = seq(10, 70, 10), include.lowest = FALSE, label = lbl_days), 
-         add_bins = cut(add, breaks = seq(400,1200, 100), include.lowest = FALSE, label = lbl_add)) %>%
-  group_by(day_bins, add_bins, ca) %>%
-  summarize(CR_avg = mean(C), n = n())
-summary(data_hm_EC$CR_avg)
-
-p3 <- data_hm_EC %>% drop_na(ca) %>%
-  ggplot(aes(x = day_bins, y = add_bins)) +
-  geom_tile(aes(fill = CR_avg)) + 
-  scale_fill_gradient2(low = "white", high = "purple", 
-                       midpoint = 0.025, 
-                       breaks = seq(0, 0.15, 0.05), 
-                       limits = c(0, 0.2)) +
-  labs(title="crown rot EC bio by temperature sum and transit time with and without CA",
-       x ="transit time (days)", y = "temperature sum (degree.days)") +
-  labs(fill = "Avg crown rot ratio") +
-  geom_text(aes(label = n), size = 2) +
-  facet_grid(. ~ ca)
-p3
-
-
-data_hm_EC %>% filter(add_bins == c("901-950") & day_bins == c("36-40") & ca == "CA")
-
-
-#Kruskall Wallis test for difference of the means
-data_EC %>% filter(add > 1000) %>%
-  group_by(ca) %>%
-  summarise(
-    count = n(),
-    mean = mean(C, na.rm = TRUE),
-    sd = sd(C, na.rm = TRUE),
-    median = median(C, na.rm = TRUE),
-    IQR = IQR(C, na.rm = TRUE)) 
-
-data_EC %>% filter(add > 1000) %>% kruskal.test(C ~ ca, data = .)
-
-
-
-model5
-
-
-
-
-
-
-
-
-
-
-     

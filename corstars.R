@@ -3,8 +3,10 @@
 # removeTriangle : remove upper or lower triangle
 # results :  if "html" or "latex"
 # the results will be displayed in html or latex format
-corstars <-function(x, method=c("pearson", "spearman"), removeTriangle=c("upper", "lower"),
-                    result=c("none", "html", "latex")){
+require(xtable)
+library(xtable)
+corstars <-function(x, method=c("pearson"), removeTriangle=c("upper"),
+                    result=c("none")){
   #Compute correlation matrix
   require(Hmisc)
   x <- as.matrix(x)
