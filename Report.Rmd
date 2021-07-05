@@ -1,14 +1,12 @@
 ---
 title: "Predicting crown rot in banana shipments"
-subtitle: "Submission for Choose your Own Project Data Science: Capstone"
 author: "Johannes W.H. van der Waal"
-date: 
+date: "4th July 2021"
+subtitle: "Submission for Choose your Own Project Data Science: Capstone"
 output:
-  bookdown::html_document2:
-      toc: true
+ pdf_document:
+toc: true
 bibliography: refs.bib
- 
-    
 ---
 
 ```{r setup, include=FALSE, warnings = FALSE}
@@ -25,17 +23,16 @@ library(lubridate)
 library(ggthemes)
 library(formattable)
 library(nnet)
-list.of.packages <- c("readxl", "tidyverse", "curl", "httr", "reshape2", "broom", "caret", "lubridate", 
-                      "ggthemes", "formattable", "nnet", "knn", "rpart", "skimr", "rpart.plot", "UBL", "glmnet", 
-                      "rf", "rda", "treebag", "svm")
-new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
-if(length(new.packages)) install.packages(new.packages)
+library(skimr)
+library(formattable)
+options(knitr.table.format = "latex")
 
 ```
 
-# Abstract
+# Abstract {-}
 **Organic bananas are grown without synthetic fertilizer or chemical pesticides. This is better for the environemnt and the health of consumers and banana workers. However, it makes export banana more susceptible to post-harvest decay, especially during the long (2-4 weeks) transit time in refrigerated containers to European markets. A notable form of post-harvest decay is rot of the cutting surface of the banana cluster, known as crown rot. Professionals in the industry have observed that the incidence of crown rot is associated with the time of the year and have the experience that the use of controlled atmosphere (CA) containers (with reduced O~2~ and increased CO~2~ content) can reduce the development of crown rot. In this article, I present an analysis of the problem based on a curated proprietary dataset with almost 7000 real shipments of organic bananas from Latin America to Europe over a time frame of more than 4 years. The analysis is performed by collecting historic weather data from a local weather station and analyze if weather has an association with the phenomenon. I conclude that this seems to be the case. I show that CA mitigates the problem when the growing temperature sums are higher and the transit time (residence time in container) longer. I develop machine learning models that can reasonably successfully predict the incidence of crwon rot on future shipments. This allows to make informed decisions on whether or not to deploy CA based on cost-benefit analysis. A number of classification algorithms is tested. As the dataset is imbalanced, it requires syntehtic sampling to achieve a good balance of accuracy pover three prediciton classes** 
 
+\tableofcontents
 
 # Introduction
 ## Background of the problem
@@ -44,10 +41,8 @@ Organic bananas are grown without synthetic fertilizer or chemical pesticides. T
 ![Crown rot causing fungi growing on petri dishes](PCA.jpg){width=300px}
 
 The crown rot phenomenon causes considerable economic damage to the industry. It is a latent defect, meaning it cannot be detected during packaging. When the fruit is packed and stowed in a refrigerated container, the external appearance of the fruit is clean and green. Only during the sea voyage, under some poorly known conditions, the disease comes to development. It is only detected on arrival, when every container is subject to a rigorous quality control. The disease only develops to its fullest extent after ripening. Bananas are supposed to arrive green and unripe, and become ripe and edible only after 5-7 days ripening at slightly elevated temperature (18°C) under addition of a trace of ethylene gas, which is a plant ripening hormone. In light to moderate cases, it causes the rejection and wastage of a certain percentage of the fruit. In severe cases, it can lead to a significant reduction of the value of the cargo, and even infect healthy fruit because the affected bananas start to ripen and emit ethylene gas, which is a trigger for banana ripening. This means a loss to the producer of the fruit and also a reduction of the supply reliability to the customer. It is therefore important to detect and reduce the disease, if possible. 
-
-![Crown rot on the cutting surfaces causing decay and premature ripening.](crown_rot.jpg)
-![](12.jpg)
-
+![Crown rot on the cutting surfaces causing decay and premature ripening.](crown_rot.jpg){width="75%"}
+![Box of organic bananas suffering from crown rot.](12.jpg){width="75%"}
 Professionals in the industry have observed that the incidence of crown rot is associated to a seasonal pattern and have the experience that the use of controlled atmosphere (CA) containers (with reduced O~2~ and increased CO~2~ content) can reduce the development of crown rot [@Lassois2014] [@Wade1993].
 The objective of this paper is to analyze factors associated with crown rot and its prevention or mitigation, and to develop a predictive model using machine learning algorithms.
 
@@ -55,7 +50,7 @@ The objective of this paper is to analyze factors associated with crown rot and 
 To achieve the objective, I use a proprietary dataset of almost 7000 data points consisting of real life quality survey data of as many container shipments of organic bananas from 2016 to the present. The raw dataset has many variables, such as producer, shipping line, port of destination. However, for the sake of simplification and anonymization, the dataset has been reduced to the most important variables, notable the packing date, the transit time and whether or not a CA container has been employed. The data is an excerpt of a larger dataset of over 20,000 rows. The data cleaning and preparation has been done outside this project, because of the proprietary nature of the data. 
 In addition to the quality data, I need weather data. This are retrieved from meteostat.org. This is an open source platform that makes historic weather data availble for many locations. 
 
-![Controlled atmosphere container.](CA_container.jpg){width=700px}
+![Controlled atmosphere container.](CA_container.jpg){width=500px}
 
 # Analysis
 ## Description of the dataset
@@ -68,10 +63,8 @@ data <- data %>% select(-X) %>% mutate(dd = as.Date(dd), ca = as.factor(ca), pd 
 The structure of the dataset is as follows:
 
 ```{r descriptive}
-library(skimr)
-library(formattable)
-descr <- skim(data)
-descr
+summary(data)
+
 ```
 ca    : dummy variable indicating if consignment is carried under controlled atmosphere
 pd    : pack date (a few days before date of departure of vessel)
@@ -87,7 +80,7 @@ The average transit time is 27.4 days. The mean of CR and CRC are both below 1% 
 
 ## Retrieving weather data
 Professionals in the industry have observed a seasonal pattern in the crown rot incidence. The following boxplot of crown rot incidence per pack date month shows that this is also the case in the data. The month of April clearly has the highest incidence.The data has been plotted for CA and non-CA separately and seems to indicate that there is a marked difference in incidence.
-```{r graph1, echo=FALSE, fig.cap='Boxplot of crown rot incidence per month'}
+```{r graph1, echo=FALSE, fig.cap='Boxplot of crown rot incidence per month', out.width = "70%", fig.align = "center"}
 #make a plot of average CR incidence per despatch month
 data %>% mutate(week = strftime(pd, format = "%V"), month = strftime(pd, format = "%m")) %>% 
   ggplot(aes(month, C*100, col = ca)) +
@@ -132,13 +125,14 @@ names(weather) <- vars # attach understandable variable names to the columns
 W_PE <- weather %>% select(date, temp) %>%
   mutate(date = as.Date(date))
 
-skim(W_PE)
+summary(W_PE)
 ```
 
 ##Processing weather data
+
 Next, I plot the weather data after I have calculated the mean temperatures per day (they are recorded 4-12 times per day).
 
-```{r graph2, echo=FALSE, fig.cap="A plot of the mean temperatures per date for Piura, Peru"}
+```{r graph2, echo=FALSE, fig.cap="A plot of the mean temperatures per date for Piura, Peru", out.width = "70%", fig.align = "center"}
 # make a dataframe with mean temperature per day
 summ_PE <- W_PE %>% 
   group_by(date) %>%
@@ -165,7 +159,7 @@ summ_add_PE <- summ_PE %>% filter(date >=  (as.Date("2015-01-01")-span*7)) %>%
   mutate(add = cdd - lag(cdd, span*7)) %>% # the accumulated degree.days or temperature sum is calculated for every day from the cumulative grow_temp
   na.exclude() #exclude rows with NaN
 ```
-```{r graph3, echo=FALSE, fig.cap="Plot of accumulated degree.days per date for Piura, Peru."}
+```{r graph3, echo=FALSE, fig.cap="Plot of accumulated degree.days per date for Piura, Peru.", out.width = "70%", fig.align = "center"}
 # for control, make a plot of accumulated degree days against date
 summ_add_PE %>%
   ggplot(aes(date, add)) +
@@ -187,7 +181,7 @@ We can now proceed to the exploratory data analysis.
 
 Now that we have accumulated degree.days, it is possible to plot the incidence of crown rot against the degree.days and see if there is any association between the two.
 
-```{r add_plot, echo=FALSE, fig.cap="Accumulated degree days and crown rot."}
+```{r add_plot, echo=FALSE, fig.cap="Accumulated degree days and crown rot.", out.width = "70%", fig.align = "center"}
 # make an overlay plot of ADD  and crown rot
 ggplot() + 
   geom_line(data=summ_add_PE, aes(x=date, y=add), color='blue') + 
@@ -218,7 +212,7 @@ data_hm_PE <- data_PE %>% drop_na(add) %>% mutate(day_bins = cut(days, breaks = 
   group_by(day_bins, add_bins, ca) %>%
   dplyr::summarize(CR_avg = mean(C), n = n())
 ```
-```{r, heatmap, echo=FALSE, fig.cap="A heatmap of crown rot against ADD and transit time(days)."}
+```{r, heatmap, echo=FALSE, fig.cap="A heatmap of crown rot against ADD and transit time(days).", out.width = "70%", fig.align = "center"}
 #make geom_tile plot
 p2 <- data_hm_PE %>%
   ggplot(aes(x = day_bins, y = add_bins)) +
@@ -246,7 +240,7 @@ The plot shows the average crown rot percentage per bin, split over with and wit
 source("corstars.R") #this retrieves the function created by ....
 
 data_PE %>% select(C, add, days, ca) %>% mutate(CA = as.numeric(ca)) %>% select(-ca) %>%
-  drop_na() %>% corstars(.) %>% formattable(align = c("l", "r", "r", "r"), fixedWidth = 50)
+  drop_na() %>% corstars(.) %>% formattable(align = c("l", "r", "r", "r"), fixedWidth = 20)
 ```
 The Pearson correlation table shows that there are significant correlations between crown rot percentage and degree.days, transit time and use of CA, but that these are generally weak (<0.5).
 
@@ -263,8 +257,8 @@ data_ML <- data_PE %>% select(ca, days, C, add, pd) %>%
 
 #make a descriptive statistics table to inspect the data
 library(skimr)
-skimmed <- skim(data_ML)
-skimmed
+summary(data_ML)
+
 
 ```
 The table shows us some important information: First there are no missing observations. Second, the dataset is imbalanced in the classes. That means that there are many "no" observations, and fewer "medium" and "high" observations. This influences the machine learning results as we shall see.
@@ -333,7 +327,7 @@ train.smote <- SmoteClassif(C_risk ~ ., train, list("low"=0.5, "medium" = 2, "hi
 
 #the table show the dataset is now balanced over the classes (using under and oversampling)
 table(train.smote$C_risk)
-skim(train.smote)
+summary(train.smote)
 ```
 ## Testing the balanced dataset
 The SMOTE-balanced dataset is now used to train the decision tree again and display the decision tree. 
@@ -497,7 +491,7 @@ df <- cbind(parameter = rownames(results_models), as_tibble(results_models)) %>%
 ```
 
 The results are plotted in two graphs, one for Accuracy and one for the kappa value.
-```{r result_plot, echo=FALSE, fig.cap="Results of classification algorithms"}
+```{r result_plot, fig.cap="Results of classification algorithms", echo=FALSE, out.width = "70%", fig.align = "center"}
 p3 <- df %>% filter(parameter == "Accuracy") %>% 
   ggplot(aes(reorder(algorithm, value), value)) +
                 geom_bar(stat = "identity") +
@@ -535,7 +529,7 @@ confusion_matrix <- as.data.frame(table(pred = y_hat_nnet_v, ref = validation$C_
 
 
 The follwing graph visualises the confusion matrix:
-```{r cfm, echo=FALSE, fig.cap="Heatmap of confusion matrix on perceptron model on final hold-out sample."}
+```{r cfm, fig.cap="Heatmap of confusion matrix on perceptron model on final hold-out sample.", echo=FALSE, out.width = "70%", fig.align = "center"}
 p5 <- ggplot(data = confusion_matrix, 
        mapping = aes(x = pred,
                      y = ref)) +
@@ -548,7 +542,7 @@ p5 <- ggplot(data = confusion_matrix,
   theme_few() 
 p5
 ```
-Figure \@ref(fig:cfm) visualises the confusion matrix. The model on a real sample achieves an accuracy of `r cfm_mlp_v$overall[1]` and a kappa value of `r cfm_mlp_v$overall[2]`. This is perhaps not impressive, but better than a random guess with an estimated accuracy of about 0.33 (3 classes). Besides, it is important that highs are as much as possible classified as highs, and not as lows, but if it is classified as a medium, it is less problematic. Of course, one could argue, that in that case it would be more logical to design it as a two-class problem. However, I have chosen for this approach to achieve a balance between reasonable accuracy of predicting mediums and highs, and not missing too many, as they can come with high costs, on the one hand, as well as not classifying lows incorrectly as medium or high and having to bear the additional cost of 1000 USD per container for operating under CA. If the economic relation between medium and high CR incidence was clearer, this could help inform such a decision. 
+Figure \@ref(fig:cfm) visualises the confusion matrix. The model on a real sample achieves an accuracy of `r cfm_nnet_v$overall[1]` and a kappa value of `r cfm_nnet_v$overall[2]`. This is perhaps not impressive, but better than a random guess with an estimated accuracy of about 0.33 (3 classes). Besides, it is important that highs are as much as possible classified as highs, and not as lows, but if it is classified as a medium, it is less problematic. Of course, one could argue, that in that case it would be more logical to design it as a two-class problem. However, I have chosen for this approach to achieve a balance between reasonable accuracy of predicting mediums and highs, and not missing too many, as they can come with high costs, on the one hand, as well as not classifying lows incorrectly as medium or high and having to bear the additional cost of 1000 USD per container for operating under CA. If the economic relation between medium and high CR incidence was clearer, this could help inform such a decision. 
 
 Finaly, it is interesting to know if the choice for balancing the data really results in a better prediction when using the selected algorithm. I do this by training a model on the imbalanced dataset, and applying to the validation set.
 ```{r final, include=FALSE}
