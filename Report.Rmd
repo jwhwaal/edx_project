@@ -3,11 +3,8 @@ title: "Predicting crown rot in banana shipments"
 author: "Johannes W.H. van der Waal"
 date: "4th July 2021"
 subtitle: "Submission for Choose your Own Project Data Science: Capstone"
-output:
- pdf_document:
-pandoc_args: [
-      "--number-sections"
-    ]
+output: pdf_document
+numbered_sections: true
 toc: true
 bibliography: refs.bib
 ---
@@ -154,7 +151,7 @@ summ_PE %>% filter(date > "2016-01-01") %>%
         axis.text.x = element_text(angle=0, hjust=1)) +
   theme_few()
 ```
-It is customary in agriculture to relate the development of crops to temperature sums: the temperature sum is the integral of the mean daily temperature above a certain crop-specific floor temperature over the time. The temperature sum is espressed as degree.days. In the case of bananas, the floor temperature is 13.5 °C. This is the temperature below which the banana plant does not grow. Not accidentally, it is also the temperature at which bananas are carried in refrigerated containers. At this temperature, the plant metabolism is reduced to the minimum. Below this temperature, the plant will die, viz. the bananas will be damaged by cold shock [@Chillet2006], [@Ganry1975]. The degree.days are a parameter that is used to determine when a crop is ready to be harvested. In the banana industry in Peru, this is not done in this way, especially because the water supply by irrigation is a limiting factor to growth. Normally, bananas are harvested 10-12 weeks after flowering. For that reason I calculate the accumulated degree.days for a set time span of 10 weeks for every single pack date. This could also be 11 or 12, but this is not expected to change much. The results are plotted in a line plot, which shows that the rolling summation has a smoothing effect.The plot now indicates how many degree.days a bunch of bananas has received after a 10 week growing cycle.  
+It is customary in agriculture to relate the development of crops to temperature sums: the temperature sum is the integral of the mean daily temperature above a certain crop-specific floor temperature over the time. The temperature sum is expressed as degree.days. In the case of bananas, the floor temperature is 13.5 °C. This is the temperature below which the banana plant does not grow. Not accidentally, it is also the temperature at which bananas are carried in refrigerated containers. At this temperature, the plant metabolism is reduced to the minimum. Below this temperature, the plant will die, viz. the bananas will be damaged by cold shock [@Chillet2006], [@Ganry1975]. The degree.days are a parameter that is used to determine when a crop is ready to be harvested. In the banana industry in Peru, this is not done in this way, especially because the water supply by irrigation is a limiting factor to growth. Normally, bananas are harvested 10-12 weeks after flowering. For that reason I calculate the accumulated degree.days for a set time span of 10 weeks for every single pack date. This could also be 11 or 12, but this is not expected to change much. The results are plotted in a line plot, which shows that the rolling summation has a smoothing effect.The plot now indicates how many degree.days a bunch of bananas has received after a 10 week growing cycle.  
 
 
 ```{r degreedays}
@@ -246,7 +243,7 @@ The plot shows the average crown rot percentage per bin, split over with and wit
 source("corstars.R") #this retrieves the function created by ....
 
 data_PE %>% select(C, add, days, ca) %>% mutate(CA = as.numeric(ca)) %>% select(-ca) %>%
-  drop_na() %>% corstars(.) %>% formattable(align = c("l", "r", "r", "r"), fixedWidth = 20)
+  drop_na() %>% corstars(.) %>% knitr::kable(caption = "Pearson correlation matrix")
 ```
 The Pearson correlation table shows that there are significant correlations between crown rot percentage and degree.days, transit time and use of CA, but that these are generally weak (<0.5).
 
@@ -292,8 +289,8 @@ test <- traintest[-trainIndex,]
 ```
 
 ##Pre-processing and tune controls
-The data are automaticall scaled and centered by using the "preProcess = c("center", "scale")" feauture of the train command in the caret package.
-The tune control features of caret are used to automatically determine the optimaltuning setting, such as the k for the k nearest neighbours, the mtry for the random forest and the complexity paramter to prune the trees in the decision tree.
+The data are automatically scaled and centered by using the "preProcess = c("center", "scale")" feature of the train command in the caret package.
+The tune control features of caret are used to automatically determine the optimal tuning setting, such as the k for the k nearest neighbours, the mtry for the random forest and the complexity parameter to prune the trees in the decision tree.
 
 ## A first machine learning test  model 
 With this data, I try a first machine learning model to get an idea of the performance. This is a recursive partitioning decision tree model, which also allows to nicely visualize the model.The complexity parameter cp is set in such a way that the model is pruned to just a few branches, to ensure a sufficiently abstract model and avoid overfitting. Automatic 10-time cross-validation is applied.
@@ -320,7 +317,7 @@ model.rpart1 <- rpart(C_risk ~ ., data = train, method = "class",control = rpart
 rpart.plot(model.rpart1)
 ```
 
-The contingency table shows that the prediction has an accuracy of `r print(model1$results$Accuracy)`.The table shows however that the sensitivity is high, in other words, it is capable of predicting true positives ("low") well, but the sensitivity is low, it is not good at predicting true negatives ("medium"'s and "high"'s). It is especially not good at predicting "medium"'s. The decision tree is informative: it gives the decision rules for deciding the probability of an observation falling in one of the classes.
+The contingency table shows that the prediction has an accuracy of `r print(cfm_r$overall[1])`.The table shows however that the sensitivity is high, in other words, it is capable of predicting true positives ("low") well, but the sensitivity is low, it is not good at predicting true negatives ("medium"'s and "high"'s). It is especially not good at predicting "medium"'s. The decision tree is informative: it gives the decision rules for deciding the probability of an observation falling in one of the classes.
 The probability of predicting lows is good, with good sensitivity (TP/(TP+FN)), but there are too many missed mediums and highs or false negatives.The specificity is high ( TP / (TN + FP)). Missing these is costly.A reason for the poor predictive capability of the positives (the mediums and highs) is that the dataset is imbalanced. There are many "low" values (majority class) and few "medium" and "high" (minority class) and this biases the algorithm towards predicting lows.
 
 ## Dealing with an imbalanced dataset
@@ -480,7 +477,7 @@ y_hat_mlp <- predict(model_mlp, newdata = test)
 cfm_mlp <- confusionMatrix(y_hat_mlp, test$C_risk, dnn = c("Prediction", "Reference"))
 ```
 
-The models take a while to calculate on an average laptop computer. After the calculation, the results are collecetd in a dataframe.
+The models take a while to calculate on an average laptop computer. After the calculation, the results are collected in a dataframe.
 ```{r results}
 # make a table of the results of the models
 
@@ -497,7 +494,7 @@ df <- cbind(parameter = rownames(results_models), as_tibble(results_models)) %>%
 ```
 
 The results are plotted in two graphs, one for Accuracy and one for the kappa value.
-```{r result_plot, fig.cap="Results of classification algorithms", echo=FALSE, out.width = "70%", fig.align = "center"}
+```{r result_plot1, fig.cap="Results of classification algorithms: Accuracy", echo=FALSE, out.width = "70%", fig.align = "center"}
 p3 <- df %>% filter(parameter == "Accuracy") %>% 
   ggplot(aes(reorder(algorithm, value), value)) +
                 geom_bar(stat = "identity") +
@@ -507,6 +504,8 @@ p3 <- df %>% filter(parameter == "Accuracy") %>%
         axis.title.y.right = element_text(color = "blue")) +
   theme_few() 
 p3 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+```
+```{r result_plot2, fig.cap="Results of classification algorithms: Kappa", echo=FALSE, out.width = "70%", fig.align = "center"}
 
 p4 <- df %>% filter(parameter == "Kappa") %>%
   ggplot(aes(reorder(algorithm, value), value)) +
@@ -518,7 +517,7 @@ p4 <- df %>% filter(parameter == "Kappa") %>%
   theme_few() 
 p4 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
 ```
-Figure \@ref(fig:result_plot) shows that different algorithms have different performance. The accuracy is generally not impressive. This is in part due to the choice for a three-class dependent variable. It is also due to incomplete predictors, introducing quite some residual error into the model. In the extended dataset, there are more predictor variables, like producer, measured fruit size, shipping line and arrival temperature. In some cases, it is known that an instance classified as "CA" is in fact a non-CA when the CA feature was ordered, but had not functioned properly.
+Figures \@ref(fig:result_plot1) and \@ref(fig:result_plot2) show that different algorithms have different performance. The accuracy is generally not impressive. This is in part due to the choice for a three-class dependent variable. It is also due to incomplete predictors, introducing quite some residual error into the model. In the extended dataset, there are more predictor variables, like producer, measured fruit size, shipping line and arrival temperature. In some cases, it is known that an instance classified as "CA" is in fact a non-CA when the CA feature was ordered, but had not functioned properly.
 
 ##Final hold-out test.
 
