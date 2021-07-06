@@ -5,11 +5,13 @@
 \contentsline {section}{Analysis}{4}{section*.7}%
 \contentsline {subsection}{Description of the dataset}{4}{section*.8}%
 \contentsline {subsection}{Retrieving weather data}{5}{section*.9}%
-\contentsline {section}{Exploratory data analysis}{7}{section*.10}%
-\contentsline {section}{Machine learning results}{10}{section*.11}%
+\contentsline {section}{Exploratory data analysis}{8}{section*.10}%
+\contentsline {section}{Machine learning results}{11}{section*.11}%
 \contentsline {subsection}{Data partitioning}{11}{section*.12}%
-\contentsline {subsection}{A first machine learning test model}{11}{section*.13}%
-\contentsline {subsection}{Dealing with an imbalanced dataset}{13}{section*.14}%
-\contentsline {subsection}{Testing the balanced dataset}{13}{section*.15}%
-\contentsline {section}{Conclusion}{18}{section*.16}%
-\contentsline {section}{References}{19}{section*.17}%
+\contentsline {subsection}{Pre-processing and tune controls}{12}{section*.13}%
+\contentsline {subsection}{A first machine learning test model}{12}{section*.14}%
+\contentsline {subsection}{Dealing with an imbalanced dataset}{13}{section*.15}%
+\contentsline {subsection}{Testing the balanced dataset}{14}{section*.16}%
+\contentsline {subsection}{Final hold-out test.}{18}{section*.17}%
+\contentsline {section}{Conclusion}{19}{section*.18}%
+\contentsline {section}{References}{20}{section*.19}%

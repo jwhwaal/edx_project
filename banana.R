@@ -10,11 +10,12 @@ library(lubridate)
 library(ggthemes)
 library(formattable)
 library(nnet)
+library(rattle)
 
 
 list.of.packages <- c("readxl", "tidyverse", "curl", "httr", "reshape2", "broom", "caret", "lubridate", 
                       "ggthemes", "formattable", "nnet", "knn", "rpart", "skimr", "rpart.plot", "UBL", "glmnet", 
-                      "rf", "rda", "treebag", "svm")
+                      "rf", "rda", "treebag", "svm", "rattle")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
@@ -101,7 +102,7 @@ summ_PE %>% filter(date > "2016-01-01") %>%
   theme_few()
 
 #formula to calculate the cumulative sums based on span and cut-off of 13.5°C
-summ_add_PE <- summ_PE %>% filter(date >=  (as.Date("2015-01-01")-span*7)) %>% 
+summ_add_PE <- summ_PE %>% filter(date >=  (as.Date("2016-01-01")-span*7)) %>% 
   mutate(grow_temp = (mean_temp - 13.5), cdd = cumsum(grow_temp)) %>% #the grow temperature is the temperature above 13.5°C under which temperature bananas do not grow but die
   mutate(add = cdd - lag(cdd, span*7)) %>% # the accumulated degree.days or temperature sum is calculated for every day from the cumulative grow_temp
   na.exclude() #exclude rows with NaN
@@ -250,14 +251,16 @@ model1 <- train(C_risk ~ ., data = train,
                 trControl = trainControl(method = "cv"))
 
 y_hat <- predict(model1, newdata = test)
-confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
-
+cfm_m1 <- confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
+cfm_m1$overall[1]
 
 #visualize the decision tree
 library(rpart.plot)
 set.seed(3, sample.kind = "Rounding")
 model.rpart1 <- rpart(C_risk ~ ., data = train, method = "class", control = rpart.control(cp = 0.01))
 rpart.plot(model.rpart1)
+prp(model.rpart1)
+fancyRpartPlot(model.rpart1)
 
 # train a simple k-nearest neighbour model 
 set.seed(1, sample.kind = "Rounding")
@@ -292,13 +295,13 @@ model_rpart <- train(C_risk ~ ., data = train.smote,
 y_hat_rpart <- predict(model_rpart, newdata = test)
 cfm_rpart <- confusionMatrix(y_hat, test$C_risk, dnn = c("Prediction", "Reference"))
 
+
 #we can again visualize the decision tree
 library(rpart.plot)
 #we can use priors of the distribution to improve the model and define minimum splits to reduce detail
 model.rpart2 <- rpart(C_risk ~ ., data = train.smote, method = "class", parms = list(split = "ca"),
                       control = rpart.control(minsplit = 50))
-rpart.plot(model.rpart2)
-
+fancyRpartPlot(model.rpart2)
 
 # train a  k-nearest neighbour model on smote dataset
 set.seed(2, sample.kind = "Rounding")
@@ -418,10 +421,10 @@ cfm_mlp <- confusionMatrix(y_hat_mlp, test$C_risk, dnn = c("Prediction", "Refere
 results_models <- data.frame(cfm_knn$overall, cfm_mlp$overall, cfm_nnet$overall, 
                              cfm_rda$overall, cfm_rf$overall, cfm_rpart$overall,
                              cfm_svm$overall, cfm_treebag$overall, cfm_glmnet$overall)
-names <- c("k-nearest neighbors", "multilayer perceptron", "neural network", "regularized discriminant analysis", "random forest",
+algo_names <- c("k-nearest neighbors", "multilayer perceptron", "neural network", "regularized discriminant analysis", "random forest",
            "recursive partitioning & regression trees", "support vector machine", "bootstrap aggregated tree", "generalized linerar model")
 results_models<- results_models[1:2,]
-colnames(results_models) <- names
+colnames(results_models) <- algo_names
 
 df <- cbind(parameter = rownames(results_models), as_tibble(results_models)) %>% 
   pivot_longer(cols = -"parameter", names_to = c("algorithm"), values_to = "value")
@@ -429,23 +432,52 @@ df <- cbind(parameter = rownames(results_models), as_tibble(results_models)) %>%
 
 p3 <- df %>% filter(parameter == "Accuracy") %>% 
   ggplot(aes(reorder(algorithm, value), value)) +
-                geom_bar(stat = "identity") +
+                geom_bar(stat = "identity", fill = "#FF6666") +
     scale_x_discrete(name = "algorithm") +
   scale_y_continuous(name = "value") +
   theme(axis.title.y = element_text(color = "grey"),
         axis.title.y.right = element_text(color = "blue")) +
   theme_few() 
-p3 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+p3 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip() 
 
 p4 <- df %>% filter(parameter == "Kappa") %>%
   ggplot(aes(reorder(algorithm, value), value)) +
-  geom_bar(stat = "identity") +
+  geom_bar(stat = "identity", fill = "#FF6666") +
   scale_x_discrete(name = "kappa") +
   scale_y_continuous(name = "value") +
   theme(axis.title.y = element_text(color = "grey"),
         axis.title.y.right = element_text(color = "blue")) +
   theme_few() 
-p4 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+p4 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip() 
+
+# make a table of the F1 values per class
+
+
+F1_models <- data.frame(cfm_knn[["byClass"]][ , "F1"], 
+                        cfm_mlp[["byClass"]][ , "F1"], 
+                        cfm_nnet[["byClass"]][ , "F1"], 
+                        cfm_rda[["byClass"]][ , "F1"], 
+                        cfm_rf[["byClass"]][ , "F1"], 
+                        cfm_rpart[["byClass"]][ , "F1"],
+                        cfm_svm[["byClass"]][ , "F1"], 
+                        cfm_treebag[["byClass"]][ , "F1"], 
+                        cfm_glmnet[["byClass"]][ , "F1"])
+colnames(F1_models) <- algo_names
+
+
+df2 <- cbind(class = str_remove(rownames(F1_models), pattern = "Class: "), as_tibble(F1_models)) %>% 
+  pivot_longer(cols = -"class", names_to = c("algorithm"), values_to = "value") 
+
+p6 <- df2 %>%  arrange(class) %>%
+  ggplot(aes(algorithm, value, fill = class)) +
+  geom_col(position = "dodge") +
+  scale_x_discrete(name = "F1-value") +
+  scale_y_continuous(name = "value") +
+  theme(axis.title.y = element_text(color = "grey"),
+        axis.title.y.right = element_text(color = "blue")) +
+  theme_few() 
+p6 + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip() 
+
 
 # final hold out test on validation sample with neural network
 # 
@@ -478,3 +510,5 @@ y_hat_nnet_t_v <- predict(model_nnet_t, newdata = validation)
 cfm_nnet_t <- confusionMatrix(y_hat_nnet_t_v, validation$C_risk, dnn = c("Prediction", "Reference"))
 cfm_nnet_t
 
+
+result_table <- data.frame(validation, prediction=y_hat_nnet_v)
