@@ -5,6 +5,9 @@ date: "4th July 2021"
 subtitle: "Submission for Choose your Own Project Data Science: Capstone"
 output:
  pdf_document:
+pandoc_args: [
+      "--number-sections"
+    ]
 toc: true
 bibliography: refs.bib
 ---
@@ -41,8 +44,11 @@ Organic bananas are grown without synthetic fertilizer or chemical pesticides. T
 ![Crown rot causing fungi growing on petri dishes](PCA.jpg){width=300px}
 
 The crown rot phenomenon causes considerable economic damage to the industry. It is a latent defect, meaning it cannot be detected during packaging. When the fruit is packed and stowed in a refrigerated container, the external appearance of the fruit is clean and green. Only during the sea voyage, under some poorly known conditions, the disease comes to development. It is only detected on arrival, when every container is subject to a rigorous quality control. The disease only develops to its fullest extent after ripening. Bananas are supposed to arrive green and unripe, and become ripe and edible only after 5-7 days ripening at slightly elevated temperature (18°C) under addition of a trace of ethylene gas, which is a plant ripening hormone. In light to moderate cases, it causes the rejection and wastage of a certain percentage of the fruit. In severe cases, it can lead to a significant reduction of the value of the cargo, and even infect healthy fruit because the affected bananas start to ripen and emit ethylene gas, which is a trigger for banana ripening. This means a loss to the producer of the fruit and also a reduction of the supply reliability to the customer. It is therefore important to detect and reduce the disease, if possible. 
+
 ![Crown rot on the cutting surfaces causing decay and premature ripening.](crown_rot.jpg){width="75%"}
+
 ![Box of organic bananas suffering from crown rot.](12.jpg){width="75%"}
+
 Professionals in the industry have observed that the incidence of crown rot is associated to a seasonal pattern and have the experience that the use of controlled atmosphere (CA) containers (with reduced O~2~ and increased CO~2~ content) can reduce the development of crown rot [@Lassois2014] [@Wade1993].
 The objective of this paper is to analyze factors associated with crown rot and its prevention or mitigation, and to develop a predictive model using machine learning algorithms.
 
