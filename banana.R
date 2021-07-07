@@ -15,7 +15,7 @@ library(rattle)
 
 list.of.packages <- c("readxl", "tidyverse", "curl", "httr", "reshape2", "broom", "caret", "lubridate", 
                       "ggthemes", "formattable", "nnet", "knn", "rpart", "skimr", "rpart.plot", "UBL", "glmnet", 
-                      "rf", "rda", "treebag", "svm", "rattle")
+                      "rf", "rda", "treebag", "svm", "rattle", "RSNNS")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
